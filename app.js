@@ -47,8 +47,7 @@ const refs = {
 
 function setStatus(message, isError = false) {
   refs.status.textContent = message;
-  refs.status.style.background = isError ? "#f4d2d2" : "";
-  refs.status.style.color = isError ? "#7a1d1d" : "";
+  refs.status.classList.toggle("error", isError);
 }
 
 function refreshFileList() {
