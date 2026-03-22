@@ -52,18 +52,18 @@
               </div>
             </div>
 
-            <div class="grid">
+            <div class="grid grid-main">
               <label class="field">
                 <span>处理模式</span>
                 <select id="profile">
+                  <option value="chi" selected>CHI 电化学数据</option>
                   <option value="generic">通用分列</option>
-                  <option value="chi">CHI 电化学数据</option>
                   <option value="raw">原始文本/末尾行</option>
                 </select>
               </label>
 
               <label class="field">
-                <span>输出布局</span>
+                <span>拼接方式</span>
                 <select id="layout">
                   <option value="horizontal">横向拼接（各文件单独统计）</option>
                   <option value="vertical">纵向合并（单表头 + 来源列）</option>
@@ -85,29 +85,9 @@
               </label>
             </div>
 
-            <div class="toggles">
-              <label><input id="include-title" type="checkbox" checked /> 写入文件名标题</label>
-              <label><input id="skip-empty" type="checkbox" checked /> 跳过空行</label>
-            </div>
-
-            <div class="grid compact">
-              <label class="field">
-                <span>标题后空行</span>
-                <input id="title-gap" type="number" min="0" value="1" />
-              </label>
-              <label class="field">
-                <span>横向空列</span>
-                <input id="col-gap" type="number" min="0" value="2" />
-              </label>
-              <label class="field">
-                <span>纵向空行</span>
-                <input id="row-gap" type="number" min="0" value="1" />
-              </label>
-            </div>
-
             <div id="generic-options" class="subpanel">
               <h3>通用分列</h3>
-              <div class="grid compact">
+              <div class="grid grid-sub">
                 <label class="field">
                   <span>分隔符</span>
                   <input id="delimiter" type="text" value="," />
@@ -121,7 +101,7 @@
 
             <div id="raw-options" class="subpanel hidden">
               <h3>原始文本</h3>
-              <div class="grid compact">
+              <div class="grid grid-sub">
                 <label class="field">
                   <span>保留最后 N 行，0 为全部</span>
                   <input id="raw-last-lines" type="number" min="0" value="300" />
@@ -131,11 +111,7 @@
 
             <div id="chi-options" class="subpanel hidden">
               <h3>CHI 电化学数据</h3>
-              <div class="grid compact">
-                <label class="field">
-                  <span>表头前缀</span>
-                  <input id="chi-header-prefix" type="text" value="Time/s" />
-                </label>
+              <div class="grid grid-sub">
                 <label class="field">
                   <span>提取方式</span>
                   <select id="chi-extract-mode">
@@ -147,7 +123,7 @@
                 </label>
               </div>
 
-              <div class="grid compact">
+              <div class="grid grid-sub">
                 <label id="chi-last-points-field" class="field">
                   <span>最后 N 行</span>
                   <input id="chi-last-points" type="number" min="0" value="300" />
@@ -165,9 +141,10 @@
                   <input id="time-max" type="number" step="any" />
                 </label>
               </div>
-              <p class="field-note">
-                横向拼接会为每个文件保留筛选后的 t/i 数据，并在底部增加平均值统计；纵向合并只保留一组表头，并额外增加来源列。
-              </p>
+              <div class="chi-hints">
+                <span class="hint-chip">横向：每个文件单独统计平均值</span>
+                <span class="hint-chip">纵向：单表头 + 来源列</span>
+              </div>
             </div>
           </section>
 

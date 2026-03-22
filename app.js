@@ -12,11 +12,6 @@ const refs = {
   layout: byId("layout"),
   exportFormat: byId("export-format"),
   outputName: byId("output-name"),
-  includeTitle: byId("include-title"),
-  skipEmpty: byId("skip-empty"),
-  titleGap: byId("title-gap"),
-  colGap: byId("col-gap"),
-  rowGap: byId("row-gap"),
   delimiter: byId("delimiter"),
   genericLastLines: byId("generic-last-lines"),
   rawLastLines: byId("raw-last-lines"),
@@ -141,7 +136,7 @@ function parseGeneric(text, fileName, options) {
   let lines = splitLines(text);
   lines = filterLastItems(lines, options.genericLastLines);
   const rows = lines
-    .filter((line) => !(options.skipEmpty && !line.trim()))
+    .filter((line) => line.trim())
     .map((line) =>
       options.delimiter
         ? line.split(options.delimiter).map((cell) => cell.trim())
@@ -154,7 +149,7 @@ function parseRaw(text, fileName, options) {
   let lines = splitLines(text);
   lines = filterLastItems(lines, options.rawLastLines);
   const rows = lines
-    .filter((line) => !(options.skipEmpty && !line.trim()))
+    .filter((line) => line.trim())
     .map((line) => [line]);
   return { kind: "plain", title: fileName, rows };
 }
@@ -273,11 +268,11 @@ function collectOptions() {
     layout: refs.layout.value,
     exportFormat: refs.exportFormat.value,
     outputName: refs.outputName.value.trim() || "txt-excel-export",
-    includeTitle: refs.includeTitle.checked,
-    skipEmpty: refs.skipEmpty.checked,
-    titleGap: Math.max(0, Number(refs.titleGap.value) || 0),
-    colGap: Math.max(0, Number(refs.colGap.value) || 0),
-    rowGap: Math.max(0, Number(refs.rowGap.value) || 0),
+    includeTitle: true,
+    skipEmpty: true,
+    titleGap: 0,
+    colGap: 1,
+    rowGap: 0,
     delimiter: refs.delimiter.value,
     genericLastLines: Math.max(0, Number(refs.genericLastLines.value) || 0),
     rawLastLines: Math.max(0, Number(refs.rawLastLines.value) || 0),
@@ -513,8 +508,6 @@ function updateModeVisibility() {
   refs.chiTimeMinField.classList.toggle("hidden", chiMode !== "time_range");
   refs.chiTimeMaxField.classList.toggle("hidden", chiMode !== "time_range");
 
-  const isChi = profile === "chi";
-  refs.includeTitle.disabled = isChi && refs.layout.value === "vertical";
 }
 
 function selectedIndex() {
