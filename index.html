@@ -39,130 +39,124 @@
           <select id="file-list" class="file-list" multiple></select>
         </aside>
 
-        <section class="main-stage">
-          <section class="panel panel-options">
-            <div class="panel-head">
-              <div>
-                <p class="panel-kicker">Config</p>
-                <h2>导出配置</h2>
-              </div>
-              <div class="panel-head-actions">
-                <button id="build-preview" class="button ghost" type="button">刷新预览</button>
-                <button id="export-button" class="button primary" type="button">导出文件</button>
-              </div>
+        <section class="panel panel-options">
+          <div class="panel-head">
+            <div>
+              <p class="panel-kicker">Config</p>
+              <h2>导出配置</h2>
             </div>
+          </div>
 
-            <div class="grid grid-main">
+          <div class="grid grid-main">
+            <label class="field">
+              <span>处理模式</span>
+              <select id="profile">
+                <option value="chi" selected>CHI 电化学数据</option>
+                <option value="generic">通用分列</option>
+                <option value="raw">原始文本/末尾行</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>拼接方式</span>
+              <select id="layout">
+                <option value="horizontal">横向拼接</option>
+                <option value="vertical">纵向合并</option>
+                <option value="both">两张表</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>导出格式</span>
+              <select id="export-format">
+                <option value="xlsx">Excel (.xlsx)</option>
+                <option value="csv">CSV (.csv)</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>文件名前缀</span>
+              <input id="output-name" type="text" value="txt-excel-export" />
+            </label>
+          </div>
+
+          <div id="generic-options" class="subpanel">
+            <h3>通用分列</h3>
+            <div class="grid grid-sub">
               <label class="field">
-                <span>处理模式</span>
-                <select id="profile">
-                  <option value="chi" selected>CHI 电化学数据</option>
-                  <option value="generic">通用分列</option>
-                  <option value="raw">原始文本/末尾行</option>
+                <span>分隔符</span>
+                <input id="delimiter" type="text" value="," />
+              </label>
+              <label class="field">
+                <span>最后 N 行</span>
+                <input id="generic-last-lines" type="number" min="0" value="0" />
+              </label>
+            </div>
+          </div>
+
+          <div id="raw-options" class="subpanel hidden">
+            <h3>原始文本</h3>
+            <div class="grid grid-sub">
+              <label class="field">
+                <span>保留最后 N 行</span>
+                <input id="raw-last-lines" type="number" min="0" value="300" />
+              </label>
+            </div>
+          </div>
+
+          <div id="chi-options" class="subpanel hidden">
+            <h3>CHI 电化学数据</h3>
+            <div class="grid grid-sub">
+              <label class="field">
+                <span>提取方式</span>
+                <select id="chi-extract-mode">
+                  <option value="last_seconds">最后 N 秒</option>
+                  <option value="time_range">指定时间区间</option>
+                  <option value="last_points">最后 N 行</option>
+                  <option value="all">全部数据</option>
                 </select>
               </label>
+            </div>
 
-              <label class="field">
-                <span>拼接方式</span>
-                <select id="layout">
-                  <option value="horizontal">横向拼接（各文件单独统计）</option>
-                  <option value="vertical">纵向合并（单表头 + 来源列）</option>
-                  <option value="both">同时输出两张表</option>
-                </select>
+            <div class="grid grid-sub">
+              <label id="chi-last-points-field" class="field">
+                <span>最后 N 行</span>
+                <input id="chi-last-points" type="number" min="0" value="300" />
               </label>
-
-              <label class="field">
-                <span>导出格式</span>
-                <select id="export-format">
-                  <option value="xlsx">Excel (.xlsx)</option>
-                  <option value="csv">CSV (.csv)</option>
-                </select>
+              <label id="chi-last-seconds-field" class="field hidden">
+                <span>最后 N 秒</span>
+                <input id="chi-last-seconds" type="number" min="0" step="0.1" value="30" />
               </label>
-
-              <label class="field">
-                <span>文件名前缀</span>
-                <input id="output-name" type="text" value="txt-excel-export" />
+              <label id="chi-time-min-field" class="field hidden">
+                <span>起始时间</span>
+                <input id="time-min" type="number" step="any" />
+              </label>
+              <label id="chi-time-max-field" class="field hidden">
+                <span>结束时间</span>
+                <input id="time-max" type="number" step="any" />
               </label>
             </div>
+          </div>
+        </section>
 
-            <div id="generic-options" class="subpanel">
-              <h3>通用分列</h3>
-              <div class="grid grid-sub">
-                <label class="field">
-                  <span>分隔符</span>
-                  <input id="delimiter" type="text" value="," />
-                </label>
-                <label class="field">
-                  <span>最后 N 行，0 为全部</span>
-                  <input id="generic-last-lines" type="number" min="0" value="0" />
-                </label>
-              </div>
+        <section class="panel panel-preview">
+          <div class="panel-head">
+            <div>
+              <p class="panel-kicker">Preview</p>
+              <h2>导出预览</h2>
             </div>
-
-            <div id="raw-options" class="subpanel hidden">
-              <h3>原始文本</h3>
-              <div class="grid grid-sub">
-                <label class="field">
-                  <span>保留最后 N 行，0 为全部</span>
-                  <input id="raw-last-lines" type="number" min="0" value="300" />
-                </label>
-              </div>
+            <div class="panel-head-actions">
+              <button id="build-preview" class="button ghost" type="button">刷新预览</button>
+              <button id="export-button" class="button primary" type="button">导出文件</button>
             </div>
-
-            <div id="chi-options" class="subpanel hidden">
-              <h3>CHI 电化学数据</h3>
-              <div class="grid grid-sub">
-                <label class="field">
-                  <span>提取方式</span>
-                  <select id="chi-extract-mode">
-                    <option value="last_seconds">最后 N 秒</option>
-                    <option value="time_range">指定时间区间</option>
-                    <option value="last_points">最后 N 行</option>
-                    <option value="all">全部数据</option>
-                  </select>
-                </label>
-              </div>
-
-              <div class="grid grid-sub">
-                <label id="chi-last-points-field" class="field">
-                  <span>最后 N 行</span>
-                  <input id="chi-last-points" type="number" min="0" value="300" />
-                </label>
-                <label id="chi-last-seconds-field" class="field hidden">
-                  <span>最后 N 秒</span>
-                  <input id="chi-last-seconds" type="number" min="0" step="0.1" value="30" />
-                </label>
-                <label id="chi-time-min-field" class="field hidden">
-                  <span>起始时间</span>
-                  <input id="time-min" type="number" step="any" />
-                </label>
-                <label id="chi-time-max-field" class="field hidden">
-                  <span>结束时间</span>
-                  <input id="time-max" type="number" step="any" />
-                </label>
-              </div>
-              <div class="chi-hints">
-                <span class="hint-chip">横向：每个文件单独统计平均值</span>
-                <span class="hint-chip">纵向：单表头 + 来源列</span>
-              </div>
-            </div>
-          </section>
-
-          <section class="panel panel-preview">
-            <div class="panel-head">
-              <div>
-                <p class="panel-kicker">Preview</p>
-                <h2>导出预览</h2>
-              </div>
-            </div>
-            <div id="status" class="status">等待选择文件。</div>
-            <div class="preview-wrap">
-              <table id="preview-table">
-                <thead></thead>
-                <tbody></tbody>
-              </table>
-            </div>
-          </section>
+          </div>
+          <div id="status" class="status">等待选择文件。</div>
+          <div class="preview-wrap">
+            <table id="preview-table">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </section>
       </main>
     </div>
