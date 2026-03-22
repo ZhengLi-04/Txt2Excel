@@ -14,7 +14,6 @@ const refs = {
   outputName: byId("output-name"),
   includeTitle: byId("include-title"),
   skipEmpty: byId("skip-empty"),
-  coerceNumbers: byId("coerce-numbers"),
   titleGap: byId("title-gap"),
   colGap: byId("col-gap"),
   rowGap: byId("row-gap"),
@@ -88,8 +87,8 @@ function asNumber(value) {
   return Number.isFinite(numeric) ? numeric : value;
 }
 
-function transformCell(value, shouldCoerceNumbers) {
-  return shouldCoerceNumbers ? asNumber(value) : value;
+function transformCell(value) {
+  return asNumber(value);
 }
 
 function filterLastItems(items, count) {
@@ -203,7 +202,6 @@ function collectOptions() {
     outputName: refs.outputName.value.trim() || "txt-excel-export",
     includeTitle: refs.includeTitle.checked,
     skipEmpty: refs.skipEmpty.checked,
-    coerceNumbers: refs.coerceNumbers.checked,
     titleGap: Math.max(0, Number(refs.titleGap.value) || 0),
     colGap: Math.max(0, Number(refs.colGap.value) || 0),
     rowGap: Math.max(0, Number(refs.rowGap.value) || 0),
@@ -234,7 +232,7 @@ function rowsForLayout(datasets, options) {
         }
       }
       dataset.rows.forEach((row) => {
-        output.push(row.map((cell) => transformCell(cell, options.coerceNumbers)));
+        output.push(row.map((cell) => transformCell(cell)));
       });
       for (let i = 0; i < options.rowGap; i += 1) {
         output.push([]);
@@ -257,7 +255,7 @@ function rowsForLayout(datasets, options) {
         const targetRow = dataStartRow + rowOffset;
         grid[targetRow] = grid[targetRow] || [];
         row.forEach((cell, colOffset) => {
-          grid[targetRow][currentCol + colOffset] = transformCell(cell, options.coerceNumbers);
+          grid[targetRow][currentCol + colOffset] = transformCell(cell);
         });
       });
       currentCol += datasetWidth(dataset) + options.colGap;
