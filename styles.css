@@ -219,6 +219,13 @@ body {
   white-space: nowrap;
 }
 
+.field-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 input,
 select,
 button {
@@ -241,6 +248,12 @@ input:focus,
 select:focus {
   border-color: rgba(47, 125, 225, 0.35);
   box-shadow: 0 0 0 3px rgba(47, 125, 225, 0.12);
+}
+
+input:disabled,
+select:disabled {
+  background: #eef4fb;
+  color: #8aa0b8;
 }
 
 .subpanel {

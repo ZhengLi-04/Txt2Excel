@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Txt Excel Studio</title>
+    <title>Txt2Excel</title>
     <link rel="stylesheet" href="./styles.css" />
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
     <script src="./app.js" defer></script>
@@ -65,8 +65,8 @@
               <label class="field">
                 <span>输出布局</span>
                 <select id="layout">
-                  <option value="horizontal">横向拼接</option>
-                  <option value="vertical">纵向合并</option>
+                  <option value="horizontal">横向拼接（各文件单独统计）</option>
+                  <option value="vertical">纵向合并（单表头 + 来源列）</option>
                   <option value="both">同时输出两张表</option>
                 </select>
               </label>
@@ -139,10 +139,10 @@
                 <label class="field">
                   <span>提取方式</span>
                   <select id="chi-extract-mode">
-                    <option value="all">全部数据</option>
-                    <option value="last_points">最后 N 行</option>
                     <option value="last_seconds">最后 N 秒</option>
                     <option value="time_range">指定时间区间</option>
+                    <option value="last_points">最后 N 行</option>
+                    <option value="all">全部数据</option>
                   </select>
                 </label>
               </div>
@@ -165,6 +165,9 @@
                   <input id="time-max" type="number" step="any" />
                 </label>
               </div>
+              <p class="field-note">
+                横向拼接会为每个文件保留筛选后的 t/i 数据，并在底部增加平均值统计；纵向合并只保留一组表头，并额外增加来源列。
+              </p>
             </div>
           </section>
 
