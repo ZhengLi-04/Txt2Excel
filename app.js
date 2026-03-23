@@ -81,8 +81,22 @@ function asNumber(value) {
   return Number.isFinite(numeric) ? numeric : value;
 }
 
+function parseNumericValue(value) {
+  const normalized = asNumber(value);
+  return typeof normalized === "number" && Number.isFinite(normalized) ? normalized : NaN;
+}
+
 function transformCell(value) {
   return asNumber(value);
+}
+
+function toDisplayName(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+  const parts = text.split(/[\\/]/);
+  return parts[parts.length - 1] || text;
 }
 
 function filterLastItems(items, count) {
@@ -117,17 +131,36 @@ function detectTimeColumnIndex(header) {
   return index >= 0 ? index : 0;
 }
 
-function detectCurrentColumnIndex(header, timeIndex) {
+function detectCurrentColumnIndex(header, timeIndex, dataRows = []) {
   const preferredIndex = header.findIndex((cell, index) => {
     const text = String(cell).trim().toLowerCase();
     if (index === timeIndex) {
       return false;
     }
-    return text.startsWith("i") || text.includes("/i") || text.includes("current");
+    return (
+      text === "i" ||
+      text.startsWith("i/") ||
+      text.includes("/i") ||
+      text.includes("current") ||
+      text.includes("<i>") ||
+      text.includes("current/")
+    );
   });
   if (preferredIndex >= 0) {
     return preferredIndex;
   }
+
+  // Fall back to the first non-time column that contains numeric data.
+  for (let columnIndex = 0; columnIndex < header.length; columnIndex += 1) {
+    if (columnIndex === timeIndex) {
+      continue;
+    }
+    const hasNumericValues = dataRows.some((row) => Number.isFinite(parseNumericValue(row[columnIndex])));
+    if (hasNumericValues) {
+      return columnIndex;
+    }
+  }
+
   return timeIndex === 0 ? 1 : 0;
 }
 
@@ -154,14 +187,14 @@ function parseRaw(text, fileName, options) {
 }
 
 function parseChi(text, fallbackName, options) {
-  let title = fallbackName;
+  let title = toDisplayName(fallbackName);
   const rows = [];
   let headerFound = false;
 
   for (const rawLine of splitLines(text)) {
     const line = rawLine.trim();
     if (line.startsWith("File:")) {
-      title = line.slice(5).trim() || fallbackName;
+      title = toDisplayName(line.slice(5).trim() || fallbackName);
     }
     if (!headerFound && line.startsWith(options.chiHeaderPrefix)) {
       headerFound = true;
@@ -179,7 +212,6 @@ function parseChi(text, fallbackName, options) {
 
   const header = rows[0];
   const timeIndex = detectTimeColumnIndex(header);
-  const currentIndex = detectCurrentColumnIndex(header, timeIndex);
 
   const dataRows = rows
     .slice(1)
@@ -188,6 +220,8 @@ function parseChi(text, fallbackName, options) {
   if (!dataRows.length) {
     throw new Error(`没有可识别的 CHI 数据行: ${fallbackName}`);
   }
+
+  const currentIndex = detectCurrentColumnIndex(header, timeIndex, dataRows);
 
   let filtered = dataRows;
   if (options.chiExtractMode === "last_points") {
@@ -214,8 +248,11 @@ function parseChi(text, fallbackName, options) {
   }
 
   const numericValues = filtered
-    .map((row) => Number(row[currentIndex]))
+    .map((row) => parseNumericValue(row[currentIndex]))
     .filter((value) => Number.isFinite(value));
+  if (!numericValues.length) {
+    throw new Error(`无法识别电流列数值: ${fallbackName}`);
+  }
   const averageValue = numericValues.length
     ? numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length
     : NaN;
@@ -236,7 +273,7 @@ function parseChi(text, fallbackName, options) {
     rows: [header, ...filtered],
     selectionLabel,
     sourceLabel: `${title} | ${selectionLabel}`,
-    summaryRow: [title, header[currentIndex] || "平均值列", formatNumber(averageValue)],
+    summaryRow: [title, `${header[currentIndex] || "电流列"} 平均值`, formatNumber(averageValue, 9)],
   };
 }
 
