@@ -107,6 +107,13 @@ function formatNumber(value, digits = 6) {
   return Number.isFinite(value) ? Number(value.toFixed(digits)) : "";
 }
 
+function normalizeHeaderText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "");
+}
+
 function describeTimeRange(mode, rows, timeIndex, options) {
   if (!rows.length) {
     return "空区间";
@@ -133,12 +140,13 @@ function detectTimeColumnIndex(header) {
 
 function detectCurrentColumnIndex(header, timeIndex, dataRows = []) {
   const preferredIndex = header.findIndex((cell, index) => {
-    const text = String(cell).trim().toLowerCase();
+    const text = normalizeHeaderText(cell);
     if (index === timeIndex) {
       return false;
     }
     return (
       text === "i" ||
+      text === "i/a" ||
       text.startsWith("i/") ||
       text.includes("/i") ||
       text.includes("current") ||
@@ -273,7 +281,9 @@ function parseChi(text, fallbackName, options) {
     rows: [header, ...filtered],
     selectionLabel,
     sourceLabel: `${title} | ${selectionLabel}`,
-    summaryRow: [title, `${header[currentIndex] || "电流列"} 平均值`, formatNumber(averageValue, 9)],
+    summaryLabel: header[currentIndex] || "电流列",
+    averageValue,
+    summaryRow: [title, selectionLabel, header[currentIndex] || "电流列", averageValue],
   };
 }
 
@@ -399,16 +409,23 @@ function buildChiHorizontalRows(datasets, options) {
     });
     currentRow += dataset.rows.length;
 
-    grid[currentRow] = grid[currentRow] || [];
-    grid[currentRow][currentCol] = "统计";
-    currentRow += 1;
+    const summaryRows = [
+      ["统计项", "值"],
+      ["文件名", dataset.title],
+      ["时间区间", dataset.selectionLabel],
+      ["统计列", dataset.summaryLabel],
+      ["平均值", dataset.averageValue],
+    ];
 
-    grid[currentRow] = grid[currentRow] || [];
-    dataset.summaryRow.forEach((cell, colOffset) => {
-      grid[currentRow][currentCol + colOffset] = transformCell(cell);
+    summaryRows.forEach((row, rowOffset) => {
+      const targetRow = currentRow + rowOffset;
+      grid[targetRow] = grid[targetRow] || [];
+      row.forEach((cell, colOffset) => {
+        grid[targetRow][currentCol + colOffset] = transformCell(cell);
+      });
     });
 
-    currentCol += Math.max(dataset.header.length, dataset.summaryRow.length) + options.colGap;
+    currentCol += Math.max(dataset.header.length, 2) + options.colGap;
   });
 
   return grid.map((row = []) => row.map((cell) => (cell === undefined ? "" : cell)));
@@ -422,7 +439,7 @@ function pushGridGapRows(grid, startRow, count) {
 
 function buildChiVerticalRows(datasets) {
   const first = datasets[0];
-  const output = [[ "来源", ...first.header ]];
+  const output = [["来源", ...first.header]];
 
   datasets.forEach((dataset) => {
     dataset.dataRows.forEach((row) => {
@@ -431,9 +448,14 @@ function buildChiVerticalRows(datasets) {
   });
 
   output.push([]);
-  output.push(["文件", "统计列", "平均值"]);
+  output.push(["文件名", "时间区间", "统计列", "平均值"]);
   datasets.forEach((dataset) => {
-    output.push(dataset.summaryRow.map((cell) => transformCell(cell)));
+    output.push([
+      transformCell(dataset.title),
+      transformCell(dataset.selectionLabel),
+      transformCell(dataset.summaryLabel),
+      transformCell(dataset.averageValue),
+    ]);
   });
 
   return output;
