@@ -138,6 +138,53 @@ function detectTimeColumnIndex(header) {
   return index >= 0 ? index : 0;
 }
 
+function isLikelyCurrentColumn(headerCell, index, timeIndex) {
+  const text = normalizeHeaderText(headerCell);
+  if (index === timeIndex) {
+    return false;
+  }
+  return (
+    text === "i" ||
+    text === "i/a" ||
+    text.startsWith("i/") ||
+    text.startsWith("i1/") ||
+    text.startsWith("i2/") ||
+    text.startsWith("i3/") ||
+    text.startsWith("i4/") ||
+    text.includes("/i") ||
+    text.includes("current") ||
+    text.includes("<i>")
+  );
+}
+
+function detectCurrentColumnIndexes(header, timeIndex, dataRows = []) {
+  const preferredIndexes = header
+    .map((cell, index) => ({ cell, index }))
+    .filter(({ cell, index }) => isLikelyCurrentColumn(cell, index, timeIndex))
+    .map(({ index }) => index);
+
+  if (preferredIndexes.length) {
+    return preferredIndexes;
+  }
+
+  const numericIndexes = [];
+  for (let columnIndex = 0; columnIndex < header.length; columnIndex += 1) {
+    if (columnIndex === timeIndex) {
+      continue;
+    }
+    const hasNumericValues = dataRows.some((row) => Number.isFinite(parseNumericValue(row[columnIndex])));
+    if (hasNumericValues) {
+      numericIndexes.push(columnIndex);
+    }
+  }
+
+  if (numericIndexes.length) {
+    return numericIndexes;
+  }
+
+  return [timeIndex === 0 ? 1 : 0];
+}
+
 function detectCurrentColumnIndex(header, timeIndex, dataRows = []) {
   const preferredIndex = header.findIndex((cell, index) => {
     const text = normalizeHeaderText(cell);
@@ -229,7 +276,8 @@ function parseChi(text, fallbackName, options) {
     throw new Error(`没有可识别的 CHI 数据行: ${fallbackName}`);
   }
 
-  const currentIndex = detectCurrentColumnIndex(header, timeIndex, dataRows);
+  const currentIndexes = detectCurrentColumnIndexes(header, timeIndex, dataRows);
+  const currentIndex = currentIndexes[0];
 
   let filtered = dataRows;
   if (options.chiExtractMode === "last_points") {
@@ -255,15 +303,25 @@ function parseChi(text, fallbackName, options) {
     throw new Error(`选定时间范围没有数据: ${fallbackName}`);
   }
 
-  const numericValues = filtered
-    .map((row) => parseNumericValue(row[currentIndex]))
-    .filter((value) => Number.isFinite(value));
-  if (!numericValues.length) {
+  const summaryMetrics = currentIndexes
+    .map((columnIndex) => {
+      const numericValues = filtered
+        .map((row) => parseNumericValue(row[columnIndex]))
+        .filter((value) => Number.isFinite(value));
+      if (!numericValues.length) {
+        return null;
+      }
+      return {
+        columnIndex,
+        label: header[columnIndex] || `列 ${columnIndex + 1}`,
+        averageValue: numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length,
+      };
+    })
+    .filter(Boolean);
+
+  if (!summaryMetrics.length) {
     throw new Error(`无法识别电流列数值: ${fallbackName}`);
   }
-  const averageValue = numericValues.length
-    ? numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length
-    : NaN;
   const selectionLabel = describeTimeRange(
     options.chiExtractMode,
     filtered,
@@ -282,8 +340,13 @@ function parseChi(text, fallbackName, options) {
     selectionLabel,
     sourceLabel: `${title} | ${selectionLabel}`,
     summaryLabel: header[currentIndex] || "电流列",
-    averageValue,
-    summaryRow: [title, selectionLabel, header[currentIndex] || "电流列", averageValue],
+    averageValue: summaryMetrics[0].averageValue,
+    summaryMetrics,
+    summaryRow: [
+      title,
+      selectionLabel,
+      ...summaryMetrics.flatMap((metric) => [metric.label, metric.averageValue]),
+    ],
   };
 }
 
@@ -413,8 +476,7 @@ function buildChiHorizontalRows(datasets, options) {
       ["统计项", "值"],
       ["文件名", dataset.title],
       ["时间区间", dataset.selectionLabel],
-      ["统计列", dataset.summaryLabel],
-      ["平均值", dataset.averageValue],
+      ...dataset.summaryMetrics.map((metric) => [metric.label + " 平均值", metric.averageValue]),
     ];
 
     summaryRows.forEach((row, rowOffset) => {
@@ -448,13 +510,22 @@ function buildChiVerticalRows(datasets) {
   });
 
   output.push([]);
-  output.push(["文件名", "时间区间", "统计列", "平均值"]);
+  const summaryHeader = ["文件名", "时间区间"];
+  const metricLabels = [];
   datasets.forEach((dataset) => {
+    dataset.summaryMetrics.forEach((metric) => {
+      if (!metricLabels.includes(metric.label)) {
+        metricLabels.push(metric.label);
+      }
+    });
+  });
+  output.push([...summaryHeader, ...metricLabels]);
+  datasets.forEach((dataset) => {
+    const metricMap = new Map(dataset.summaryMetrics.map((metric) => [metric.label, metric.averageValue]));
     output.push([
       transformCell(dataset.title),
       transformCell(dataset.selectionLabel),
-      transformCell(dataset.summaryLabel),
-      transformCell(dataset.averageValue),
+      ...metricLabels.map((label) => transformCell(metricMap.get(label) ?? "")),
     ]);
   });
 
