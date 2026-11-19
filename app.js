@@ -1,33 +1,25 @@
 const state = {
   files: [],
   datasets: [],
+  previewRows: [],
+  previewColumnCount: 0,
+  previewRange: { start: -1, end: -1 },
+  previewFrame: null,
+  previewMode: "data",
 };
 
+const PREVIEW_ROW_HEIGHT = 29;
+const PREVIEW_OVERSCAN = 8;
 const byId = (id) => document.getElementById(id);
-
 const refs = {
   fileInput: byId("file-input"),
   fileList: byId("file-list"),
-  profile: byId("profile"),
-  layout: byId("layout"),
-  exportFormat: byId("export-format"),
+  layoutInputs: Array.from(document.querySelectorAll('input[name="layout"]')),
   outputName: byId("output-name"),
-  delimiter: byId("delimiter"),
-  genericLastLines: byId("generic-last-lines"),
-  rawLastLines: byId("raw-last-lines"),
-  chiExtractMode: byId("chi-extract-mode"),
-  chiLastPoints: byId("chi-last-points"),
-  chiLastSeconds: byId("chi-last-seconds"),
-  timeMin: byId("time-min"),
-  timeMax: byId("time-max"),
-  genericOptions: byId("generic-options"),
-  rawOptions: byId("raw-options"),
-  chiOptions: byId("chi-options"),
-  chiLastPointsField: byId("chi-last-points-field"),
-  chiLastSecondsField: byId("chi-last-seconds-field"),
-  chiTimeMinField: byId("chi-time-min-field"),
-  chiTimeMaxField: byId("chi-time-max-field"),
+  statisticsDuration: byId("statistics-duration"),
+  includeMetadata: byId("chi-include-metadata"),
   status: byId("status"),
+  previewWrap: document.querySelector(".preview-wrap"),
   previewHead: document.querySelector("#preview-table thead"),
   previewBody: document.querySelector("#preview-table tbody"),
   buildPreview: byId("build-preview"),
@@ -36,7 +28,13 @@ const refs = {
   moveUp: byId("move-up"),
   moveDown: byId("move-down"),
   clearFiles: byId("clear-files"),
+  previewDataTab: byId("preview-data-tab"),
+  previewStatisticsTab: byId("preview-statistics-tab"),
 };
+
+function checkedValue(name) {
+  return document.querySelector(`input[name="${name}"]:checked`)?.value || "";
+}
 
 function setStatus(message, isError = false) {
   refs.status.textContent = message;
@@ -66,577 +64,384 @@ function splitLines(text) {
   return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
 }
 
-function asNumber(value) {
-  if (typeof value !== "string") {
-    return value;
-  }
-  const stripped = value.trim();
-  if (!stripped) {
-    return value;
-  }
-  if (/^-?\d+(,\d{3})*$/.test(stripped)) {
-    return Number(stripped.replace(/,/g, ""));
-  }
-  const numeric = Number(stripped);
-  return Number.isFinite(numeric) ? numeric : value;
-}
-
-function parseNumericValue(value) {
-  const normalized = asNumber(value);
-  return typeof normalized === "number" && Number.isFinite(normalized) ? normalized : NaN;
-}
-
-function transformCell(value) {
-  return asNumber(value);
-}
-
-function toDisplayName(value) {
-  const text = String(value || "").trim();
-  if (!text) {
-    return "";
-  }
-  const parts = text.split(/[\\/]/);
-  return parts[parts.length - 1] || text;
-}
-
-function filterLastItems(items, count) {
-  return count > 0 ? items.slice(-count) : items;
-}
-
-function formatNumber(value, digits = 6) {
-  return Number.isFinite(value) ? Number(value.toFixed(digits)) : "";
-}
-
-function normalizeHeaderText(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "");
-}
-
-function describeTimeRange(mode, rows, timeIndex, options) {
-  if (!rows.length) {
-    return "空区间";
-  }
-  const firstTime = Number(rows[0][timeIndex]);
-  const lastTime = Number(rows[rows.length - 1][timeIndex]);
-
-  if (mode === "last_seconds") {
-    return `最后 ${options.chiLastSeconds}s (${formatNumber(firstTime, 3)}-${formatNumber(lastTime, 3)}s)`;
-  }
-  if (mode === "time_range") {
-    return `${formatNumber(firstTime, 3)}-${formatNumber(lastTime, 3)}s`;
-  }
-  if (mode === "last_points") {
-    return `最后 ${rows.length} 行 (${formatNumber(firstTime, 3)}-${formatNumber(lastTime, 3)}s)`;
-  }
-  return `全部数据 (${formatNumber(firstTime, 3)}-${formatNumber(lastTime, 3)}s)`;
-}
-
-function detectTimeColumnIndex(header) {
-  const index = header.findIndex((cell) => /time/i.test(String(cell)));
-  return index >= 0 ? index : 0;
-}
-
-function isLikelyCurrentColumn(headerCell, index, timeIndex) {
-  const text = normalizeHeaderText(headerCell);
-  if (index === timeIndex) {
-    return false;
-  }
-  return (
-    text === "i" ||
-    text === "i/a" ||
-    text.startsWith("i/") ||
-    text.startsWith("i1/") ||
-    text.startsWith("i2/") ||
-    text.startsWith("i3/") ||
-    text.startsWith("i4/") ||
-    text.includes("/i") ||
-    text.includes("current") ||
-    text.includes("<i>")
-  );
-}
-
-function detectCurrentColumnIndexes(header, timeIndex, dataRows = []) {
-  const preferredIndexes = header
-    .map((cell, index) => ({ cell, index }))
-    .filter(({ cell, index }) => isLikelyCurrentColumn(cell, index, timeIndex))
-    .map(({ index }) => index);
-
-  if (preferredIndexes.length) {
-    return preferredIndexes;
-  }
-
-  const numericIndexes = [];
-  for (let columnIndex = 0; columnIndex < header.length; columnIndex += 1) {
-    if (columnIndex === timeIndex) {
-      continue;
-    }
-    const hasNumericValues = dataRows.some((row) => Number.isFinite(parseNumericValue(row[columnIndex])));
-    if (hasNumericValues) {
-      numericIndexes.push(columnIndex);
+function splitCsvLine(line) {
+  const cells = [];
+  let cell = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (character === '"') {
+      if (quoted && line[index + 1] === '"') {
+        cell += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (character === "," && !quoted) {
+      cells.push(cell.trim());
+      cell = "";
+    } else {
+      cell += character;
     }
   }
-
-  if (numericIndexes.length) {
-    return numericIndexes;
-  }
-
-  return [timeIndex === 0 ? 1 : 0];
+  cells.push(cell.trim());
+  return cells;
 }
 
-function detectCurrentColumnIndex(header, timeIndex, dataRows = []) {
-  const preferredIndex = header.findIndex((cell, index) => {
-    const text = normalizeHeaderText(cell);
-    if (index === timeIndex) {
-      return false;
+function isNumeric(value) {
+  return value !== "" && Number.isFinite(Number(value));
+}
+
+function asExcelValue(value) {
+  const trimmed = String(value ?? "").trim();
+  if (trimmed && Number.isFinite(Number(trimmed))) return Number(trimmed);
+  return trimmed;
+}
+
+function isDataHeader(cells) {
+  if (cells.length < 2) return false;
+  const hasTime = cells.some((cell) => /^time\b|^time\s*\//i.test(cell));
+  const hasPotential = cells.some((cell) => /^potential\b/i.test(cell));
+  const hasCurrent = cells.some((cell) => /^current\b|^i\d+\s*\/\s*a$/i.test(cell));
+  return hasTime || (hasPotential && hasCurrent);
+}
+
+function parseMetadata(lines) {
+  const metadata = new Map();
+  let noteIndex = 1;
+  lines.forEach((line, index) => {
+    const value = line.trim();
+    if (!value) return;
+    if (index === 0) {
+      metadata.set("日期时间", value);
+      return;
     }
-    return (
-      text === "i" ||
-      text === "i/a" ||
-      text.startsWith("i/") ||
-      text.includes("/i") ||
-      text.includes("current") ||
-      text.includes("<i>") ||
-      text.includes("current/")
-    );
+    const match = value.match(/^\s*([^:=]+?)\s*[:=]\s*(.*)$/);
+    if (match) {
+      const key = match[1].trim();
+      let label = key;
+      let suffix = 2;
+      while (metadata.has(label)) label = `${key} ${suffix++}`;
+      metadata.set(label, match[2].trim());
+    } else {
+      metadata.set(`说明 ${noteIndex++}`, value);
+    }
   });
-  if (preferredIndex >= 0) {
-    return preferredIndex;
-  }
-
-  // Fall back to the first non-time column that contains numeric data.
-  for (let columnIndex = 0; columnIndex < header.length; columnIndex += 1) {
-    if (columnIndex === timeIndex) {
-      continue;
-    }
-    const hasNumericValues = dataRows.some((row) => Number.isFinite(parseNumericValue(row[columnIndex])));
-    if (hasNumericValues) {
-      return columnIndex;
-    }
-  }
-
-  return timeIndex === 0 ? 1 : 0;
+  return metadata;
 }
 
-function parseGeneric(text, fileName, options) {
-  let lines = splitLines(text);
-  lines = filterLastItems(lines, options.genericLastLines);
-  const rows = lines
-    .filter((line) => line.trim())
-    .map((line) =>
-      options.delimiter
-        ? line.split(options.delimiter).map((cell) => cell.trim())
-        : [line]
-    );
-  return { kind: "plain", title: fileName, rows };
-}
-
-function parseRaw(text, fileName, options) {
-  let lines = splitLines(text);
-  lines = filterLastItems(lines, options.rawLastLines);
-  const rows = lines
-    .filter((line) => line.trim())
-    .map((line) => [line]);
-  return { kind: "plain", title: fileName, rows };
-}
-
-function parseChi(text, fallbackName, options) {
-  let title = toDisplayName(fallbackName);
-  const rows = [];
-  let headerFound = false;
+function parseChi(text, fileName) {
+  const metadataLines = [];
+  let header = null;
+  let dataRows = [];
 
   for (const rawLine of splitLines(text)) {
     const line = rawLine.trim();
-    if (line.startsWith("File:")) {
-      title = toDisplayName(line.slice(5).trim() || fallbackName);
-    }
-    if (!headerFound && line.startsWith(options.chiHeaderPrefix)) {
-      headerFound = true;
-      rows.push(line.split(",").map((cell) => cell.trim()));
+    if (!line) continue;
+    const cells = splitCsvLine(line);
+    if (!header) {
+      if (isDataHeader(cells)) {
+        header = cells;
+      } else {
+        metadataLines.push(line);
+      }
       continue;
     }
-    if (headerFound && line) {
-      rows.push(line.split(",").map((cell) => cell.trim()));
+
+    if (cells.join("\u0000") === header.join("\u0000")) continue;
+    const numericCount = cells.filter(isNumeric).length;
+    if (cells.length >= 2 && numericCount >= 2) {
+      dataRows.push(cells.map(asExcelValue));
     }
   }
 
-  if (!rows.length) {
-    throw new Error(`未找到 CHI 表头: ${fallbackName}`);
+  if (!header) {
+    throw new Error(`未找到可识别的数据表头：${fileName}。支持 Time 列，或 Potential/V 配合 Current/A、i1/A 等电流列。`);
   }
-
-  const header = rows[0];
-  const timeIndex = detectTimeColumnIndex(header);
-
-  const dataRows = rows
-    .slice(1)
-    .filter((row) => Number.isFinite(Number(row[timeIndex])));
-
   if (!dataRows.length) {
-    throw new Error(`没有可识别的 CHI 数据行: ${fallbackName}`);
+    throw new Error(`表头后没有可转换的数值数据：${fileName}`);
   }
-
-  const currentIndexes = detectCurrentColumnIndexes(header, timeIndex, dataRows);
-  const currentIndex = currentIndexes[0];
-
-  let filtered = dataRows;
-  if (options.chiExtractMode === "last_points") {
-    filtered = filterLastItems(dataRows, options.chiLastPoints);
-  } else if (options.chiExtractMode === "last_seconds") {
-    const lastTime = Number(dataRows[dataRows.length - 1][timeIndex]);
-    const cutoff = lastTime - options.chiLastSeconds;
-    filtered = dataRows.filter((row) => Number(row[timeIndex]) >= cutoff);
-  } else if (options.chiExtractMode === "time_range") {
-    filtered = dataRows.filter((row) => {
-      const time = Number(row[timeIndex]);
-      if (options.timeMin !== null && time < options.timeMin) {
-        return false;
-      }
-      if (options.timeMax !== null && time > options.timeMax) {
-        return false;
-      }
-      return true;
-    });
-  }
-
-  if (!filtered.length) {
-    throw new Error(`选定时间范围没有数据: ${fallbackName}`);
-  }
-
-  const summaryMetrics = currentIndexes
-    .map((columnIndex) => {
-      const numericValues = filtered
-        .map((row) => parseNumericValue(row[columnIndex]))
-        .filter((value) => Number.isFinite(value));
-      if (!numericValues.length) {
-        return null;
-      }
-      return {
-        columnIndex,
-        label: header[columnIndex] || `列 ${columnIndex + 1}`,
-        averageValue: numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length,
-      };
-    })
-    .filter(Boolean);
-
-  if (!summaryMetrics.length) {
-    throw new Error(`无法识别电流列数值: ${fallbackName}`);
-  }
-  const selectionLabel = describeTimeRange(
-    options.chiExtractMode,
-    filtered,
-    timeIndex,
-    options
-  );
 
   return {
-    kind: "chi",
-    title,
+    title: fileName,
     header,
-    timeIndex,
-    currentIndex,
-    dataRows: filtered,
-    rows: [header, ...filtered],
-    selectionLabel,
-    sourceLabel: `${title} | ${selectionLabel}`,
-    summaryLabel: header[currentIndex] || "电流列",
-    averageValue: summaryMetrics[0].averageValue,
-    summaryMetrics,
-    summaryRow: [
-      title,
-      selectionLabel,
-      ...summaryMetrics.flatMap((metric) => [metric.label, metric.averageValue]),
-    ],
+    dataRows,
+    metadata: parseMetadata(metadataLines),
   };
-}
-
-async function buildDatasets() {
-  const options = collectOptions();
-  if (!state.files.length) {
-    throw new Error("请先添加至少一个 TXT 文件。");
-  }
-
-  const datasets = [];
-  for (const file of state.files) {
-    const text = await readFileText(file);
-    if (options.profile === "chi") {
-      datasets.push(parseChi(text, file.name, options));
-    } else if (options.profile === "raw") {
-      datasets.push(parseRaw(text, file.name, options));
-    } else {
-      datasets.push(parseGeneric(text, file.name, options));
-    }
-  }
-  state.datasets = datasets;
-  return { datasets, options };
 }
 
 function collectOptions() {
   return {
-    profile: refs.profile.value,
-    layout: refs.layout.value,
-    exportFormat: refs.exportFormat.value,
-    outputName: refs.outputName.value.trim() || "txt-excel-export",
-    includeTitle: true,
-    skipEmpty: true,
-    titleGap: 0,
-    colGap: 1,
-    rowGap: 0,
-    delimiter: refs.delimiter.value,
-    genericLastLines: Math.max(0, Number(refs.genericLastLines.value) || 0),
-    rawLastLines: Math.max(0, Number(refs.rawLastLines.value) || 0),
-    chiHeaderPrefix: "Time/s",
-    chiExtractMode: refs.chiExtractMode.value,
-    chiLastPoints: Math.max(0, Number(refs.chiLastPoints.value) || 0),
-    chiLastSeconds: Math.max(0, Number(refs.chiLastSeconds.value) || 0),
-    timeMin: refs.timeMin.value === "" ? null : Number(refs.timeMin.value),
-    timeMax: refs.timeMax.value === "" ? null : Number(refs.timeMax.value),
+    layout: checkedValue("layout") || "horizontal",
+    outputName: refs.outputName.value.trim() || "chi-converted-data",
+    statisticsDuration: Math.max(0.1, Number(refs.statisticsDuration.value) || 30),
+    includeMetadata: refs.includeMetadata.checked,
   };
 }
 
-function datasetWidth(dataset) {
-  return dataset.rows.reduce((max, row) => Math.max(max, row.length), 1);
-}
-
-function pushGapRows(output, count) {
-  for (let i = 0; i < count; i += 1) {
-    output.push([]);
+async function buildDatasets() {
+  if (!state.files.length) throw new Error("请先添加至少一个 CHI TXT 文件。");
+  const datasets = [];
+  for (const file of state.files) {
+    datasets.push(parseChi(await readFileText(file), file.name));
   }
+  state.datasets = datasets;
+  return datasets;
 }
 
-function rowsForGenericLayout(datasets, options) {
-  if (options.layout === "vertical") {
-    const output = [];
+function buildHorizontalRows(datasets) {
+  const rows = [];
+  const widths = datasets.map((dataset) => dataset.header.length);
+  const totalColumns = widths.reduce((sum, width) => sum + width, 0);
+  rows.push(datasets.flatMap((dataset) => [dataset.title, ...Array(dataset.header.length - 1).fill("")]));
+  rows.push(datasets.flatMap((dataset) => dataset.header));
+  const maxDataRows = Math.max(...datasets.map((dataset) => dataset.dataRows.length));
+  for (let rowIndex = 0; rowIndex < maxDataRows; rowIndex += 1) {
+    const row = [];
     datasets.forEach((dataset) => {
-      if (options.includeTitle) {
-        output.push([dataset.title]);
-        pushGapRows(output, options.titleGap);
-      }
-      dataset.rows.forEach((row) => {
-        output.push(row.map((cell) => transformCell(cell)));
-      });
-      pushGapRows(output, options.rowGap);
+      const values = dataset.dataRows[rowIndex] || [];
+      row.push(...Array.from({ length: dataset.header.length }, (_, column) => values[column] ?? ""));
     });
-    return output;
+    rows.push(Array.from({ length: totalColumns }, (_, column) => row[column] ?? ""));
   }
-
-  if (options.layout === "horizontal") {
-    const grid = [];
-    let currentCol = 0;
-    datasets.forEach((dataset) => {
-      let dataStartRow = 0;
-      if (options.includeTitle) {
-        grid[0] = grid[0] || [];
-        grid[0][currentCol] = dataset.title;
-        dataStartRow = options.titleGap + 1;
-      }
-      dataset.rows.forEach((row, rowOffset) => {
-        const targetRow = dataStartRow + rowOffset;
-        grid[targetRow] = grid[targetRow] || [];
-        row.forEach((cell, colOffset) => {
-          grid[targetRow][currentCol + colOffset] = transformCell(cell);
-        });
-      });
-      currentCol += datasetWidth(dataset) + options.colGap;
-    });
-    return grid.map((row = []) => row.map((cell) => (cell === undefined ? "" : cell)));
-  }
-
-  throw new Error("CSV 只支持横向拼接或纵向合并。");
+  return rows;
 }
 
-function buildChiHorizontalRows(datasets, options) {
-  const grid = [];
-  let currentCol = 0;
-
+function buildVerticalRows(datasets) {
+  const columns = [];
+  datasets.forEach((dataset) => dataset.header.forEach((header) => {
+    if (!columns.includes(header)) columns.push(header);
+  }));
+  const rows = [["文件名", ...columns]];
   datasets.forEach((dataset) => {
-    let currentRow = 0;
-    if (options.includeTitle) {
-      grid[currentRow] = grid[currentRow] || [];
-      grid[currentRow][currentCol] = dataset.title;
-      currentRow += 1;
-      pushGridGapRows(grid, currentRow, options.titleGap);
-      currentRow += options.titleGap;
-    }
-
-    grid[currentRow] = grid[currentRow] || [];
-    grid[currentRow][currentCol] = dataset.selectionLabel;
-    currentRow += 1;
-
-    dataset.rows.forEach((row, rowOffset) => {
-      const targetRow = currentRow + rowOffset;
-      grid[targetRow] = grid[targetRow] || [];
-      row.forEach((cell, colOffset) => {
-        grid[targetRow][currentCol + colOffset] = transformCell(cell);
-      });
+    const indexes = new Map(dataset.header.map((header, index) => [header, index]));
+    dataset.dataRows.forEach((dataRow) => {
+      rows.push([dataset.title, ...columns.map((header) => {
+        const index = indexes.get(header);
+        return index === undefined ? "" : dataRow[index] ?? "";
+      })]);
     });
-    currentRow += dataset.rows.length;
-
-    const summaryRows = [
-      ["统计项", "值"],
-      ["文件名", dataset.title],
-      ["时间区间", dataset.selectionLabel],
-      ...dataset.summaryMetrics.map((metric) => [metric.label + " 平均值", metric.averageValue]),
-    ];
-
-    summaryRows.forEach((row, rowOffset) => {
-      const targetRow = currentRow + rowOffset;
-      grid[targetRow] = grid[targetRow] || [];
-      row.forEach((cell, colOffset) => {
-        grid[targetRow][currentCol + colOffset] = transformCell(cell);
-      });
-    });
-
-    currentCol += Math.max(dataset.header.length, 2) + options.colGap;
   });
-
-  return grid.map((row = []) => row.map((cell) => (cell === undefined ? "" : cell)));
+  return rows;
 }
 
-function pushGridGapRows(grid, startRow, count) {
-  for (let i = 0; i < count; i += 1) {
-    grid[startRow + i] = grid[startRow + i] || [];
-  }
+function buildDataRows(datasets, options) {
+  return options.layout === "vertical"
+    ? buildVerticalRows(datasets)
+    : buildHorizontalRows(datasets);
 }
 
-function buildChiVerticalRows(datasets) {
-  const first = datasets[0];
-  const output = [["来源", ...first.header]];
-
-  datasets.forEach((dataset) => {
-    dataset.dataRows.forEach((row) => {
-      output.push([dataset.sourceLabel, ...row.map((cell) => transformCell(cell))]);
-    });
-  });
-
-  output.push([]);
-  const summaryHeader = ["文件名", "时间区间"];
-  const metricLabels = [];
-  datasets.forEach((dataset) => {
-    dataset.summaryMetrics.forEach((metric) => {
-      if (!metricLabels.includes(metric.label)) {
-        metricLabels.push(metric.label);
-      }
-    });
-  });
-  output.push([...summaryHeader, ...metricLabels]);
-  datasets.forEach((dataset) => {
-    const metricMap = new Map(dataset.summaryMetrics.map((metric) => [metric.label, metric.averageValue]));
-    output.push([
-      transformCell(dataset.title),
-      transformCell(dataset.selectionLabel),
-      ...metricLabels.map((label) => transformCell(metricMap.get(label) ?? "")),
-    ]);
-  });
-
-  return output;
+function buildMetadataRows(datasets) {
+  const keys = [];
+  datasets.forEach((dataset) => dataset.metadata.forEach((_, key) => {
+    if (!keys.includes(key)) keys.push(key);
+  }));
+  return [
+    ["参数", ...datasets.map((dataset) => dataset.title)],
+    ...keys.map((key) => [key, ...datasets.map((dataset) => dataset.metadata.get(key) ?? "")]),
+  ];
 }
 
-function rowsForLayout(datasets, options) {
-  if (options.profile === "chi") {
-    if (options.layout === "horizontal") {
-      return buildChiHorizontalRows(datasets, options);
-    }
-    if (options.layout === "vertical") {
-      return buildChiVerticalRows(datasets);
-    }
-    throw new Error("CSV 只支持横向拼接或纵向合并。");
+function findTimeColumnIndex(header) {
+  return header.findIndex((cell) => /^time(?:\b|\s*\/)/i.test(String(cell).trim()));
+}
+
+function roundedNumber(value, digits = 10) {
+  if (!Number.isFinite(value)) return "";
+  return Number(value.toFixed(digits));
+}
+
+function formatTime(value) {
+  return Number.isFinite(value) ? roundedNumber(value, 6) : "";
+}
+
+function uniqueMeasurementLabels(dataset, timeIndex) {
+  const counts = new Map();
+  return dataset.header.map((header, index) => {
+    if (index === timeIndex) return "";
+    const base = String(header || `列 ${index + 1}`).trim() || `列 ${index + 1}`;
+    const count = (counts.get(base) || 0) + 1;
+    counts.set(base, count);
+    return count === 1 ? base : `${base} (${count})`;
+  });
+}
+
+function calculateDatasetStatistics(dataset, duration) {
+  const timeIndex = findTimeColumnIndex(dataset.header);
+  if (timeIndex < 0) {
+    return {
+      title: dataset.title,
+      rangeLabel: "无 Time 列，无法按时长统计",
+      actualDuration: "",
+      pointCount: 0,
+      averages: new Map(),
+    };
   }
 
-  return rowsForGenericLayout(datasets, options);
+  const timedRows = dataset.dataRows
+    .map((row) => ({ row, time: Number(row[timeIndex]) }))
+    .filter(({ time }) => Number.isFinite(time));
+  if (!timedRows.length) {
+    return {
+      title: dataset.title,
+      rangeLabel: "Time 列没有数值",
+      actualDuration: "",
+      pointCount: 0,
+      averages: new Map(),
+    };
+  }
+
+  const endTime = Math.max(...timedRows.map(({ time }) => time));
+  const cutoff = endTime - duration;
+  const selected = timedRows.filter(({ time }) => time >= cutoff && time <= endTime);
+  const startTime = Math.min(...selected.map(({ time }) => time));
+  const labels = uniqueMeasurementLabels(dataset, timeIndex);
+  const averages = new Map();
+
+  dataset.header.forEach((_, columnIndex) => {
+    if (columnIndex === timeIndex) return;
+    const values = selected
+      .map(({ row }) => Number(row[columnIndex]))
+      .filter((value) => Number.isFinite(value));
+    if (!values.length) return;
+    averages.set(labels[columnIndex], values.reduce((sum, value) => sum + value, 0) / values.length);
+  });
+
+  return {
+    title: dataset.title,
+    rangeLabel: `${formatTime(startTime)}–${formatTime(endTime)} s`,
+    actualDuration: roundedNumber(endTime - startTime, 6),
+    pointCount: selected.length,
+    averages,
+  };
+}
+
+function buildStatisticsRows(datasets, duration) {
+  const statistics = datasets.map((dataset) => calculateDatasetStatistics(dataset, duration));
+  const labels = [];
+  statistics.forEach((item) => item.averages.forEach((_, label) => {
+    if (!labels.includes(label)) labels.push(label);
+  }));
+  return [
+    ["文件名", "统计范围", "实际时长/s", "数据点数", ...labels.map((label) => `${label} 平均值`)],
+    ...statistics.map((item) => [
+      item.title,
+      item.rangeLabel,
+      item.actualDuration,
+      item.pointCount,
+      ...labels.map((label) => roundedNumber(item.averages.get(label), 12)),
+    ]),
+  ];
+}
+
+function sheetFromRows(rows, columnWidth = 16) {
+  const worksheet = XLSX.utils.aoa_to_sheet(rows);
+  const width = rows.reduce((max, row) => Math.max(max, row.length), 0);
+  worksheet["!cols"] = Array.from({ length: width }, () => ({ wch: columnWidth }));
+  return worksheet;
 }
 
 function buildWorkbook(datasets, options) {
-  const workbook = XLSX.utils.book_new();
-  if (options.layout === "both") {
-    const horizontalRows = rowsForLayout(datasets, { ...options, layout: "horizontal" });
-    const verticalRows = rowsForLayout(datasets, { ...options, layout: "vertical" });
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(horizontalRows), "Horizontal Merge");
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(verticalRows), "Vertical Merge");
-    return workbook;
+  if (typeof XLSX === "undefined") {
+    throw new Error("Excel 导出组件尚未加载，请检查网络后刷新页面。");
   }
-
-  const rows = rowsForLayout(datasets, options);
-  const sheetName = options.layout === "horizontal" ? "Horizontal Merge" : "Vertical Merge";
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), sheetName);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheetFromRows(buildDataRows(datasets, options)), "Origin Data");
+  XLSX.utils.book_append_sheet(
+    workbook,
+    sheetFromRows(buildStatisticsRows(datasets, options.statisticsDuration), 20),
+    "Statistics"
+  );
+  if (options.includeMetadata) {
+    XLSX.utils.book_append_sheet(workbook, sheetFromRows(buildMetadataRows(datasets), 24), "Header Info");
+  }
   return workbook;
 }
 
-function downloadBlob(blob, fileName) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = fileName;
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
-
-function exportCsv(datasets, options) {
-  const rows = rowsForLayout(datasets, options);
-  const csv = rows
-    .map((row) =>
-      row
-        .map((cell) => {
-          const value = cell === undefined || cell === null ? "" : String(cell);
-          return /[",\n]/.test(value) ? `"${value.replace(/"/g, "\"\"")}"` : value;
-        })
-        .join(",")
-    )
-    .join("\r\n");
-  const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
-  downloadBlob(blob, `${options.outputName}.csv`);
-}
-
 function exportXlsx(datasets, options) {
-  if (typeof XLSX === "undefined") {
-    throw new Error("XLSX 库未加载完成，请检查网络或稍后重试。");
-  }
-  const workbook = buildWorkbook(datasets, options);
-  XLSX.writeFile(workbook, `${options.outputName}.xlsx`, { compression: true });
+  XLSX.writeFile(buildWorkbook(datasets, options), `${options.outputName}.xlsx`, { compression: true });
 }
 
-function renderPreview(datasets, options) {
-  refs.previewHead.innerHTML = "";
-  refs.previewBody.innerHTML = "";
+function appendSpacerRow(height) {
+  if (height <= 0) return;
+  const tr = document.createElement("tr");
+  tr.className = "preview-spacer";
+  const td = document.createElement("td");
+  td.colSpan = Math.max(1, state.previewColumnCount);
+  td.style.height = `${height}px`;
+  tr.append(td);
+  refs.previewBody.append(tr);
+}
 
-  const previewRows =
-    options.layout === "both"
-      ? rowsForLayout(datasets, { ...options, layout: "horizontal" })
-      : rowsForLayout(datasets, options);
-  const slicedRows = previewRows.slice(0, 12);
-  const maxColumns = slicedRows.reduce((max, row) => Math.max(max, row.length), 0);
-
-  const headRow = document.createElement("tr");
-  for (let col = 0; col < maxColumns; col += 1) {
-    const th = document.createElement("th");
-    th.textContent = `列 ${col + 1}`;
-    headRow.append(th);
+function renderVirtualPreview(force = false) {
+  if (!state.previewRows.length) {
+    refs.previewBody.innerHTML = "";
+    return;
   }
-  refs.previewHead.append(headRow);
-
-  slicedRows.forEach((row) => {
+  const scrollTop = refs.previewWrap.scrollTop;
+  const viewportHeight = refs.previewWrap.clientHeight || 420;
+  const start = Math.max(0, Math.floor(scrollTop / PREVIEW_ROW_HEIGHT) - PREVIEW_OVERSCAN);
+  const end = Math.min(state.previewRows.length, Math.ceil((scrollTop + viewportHeight) / PREVIEW_ROW_HEIGHT) + PREVIEW_OVERSCAN);
+  if (!force && start === state.previewRange.start && end === state.previewRange.end) return;
+  state.previewRange = { start, end };
+  refs.previewBody.innerHTML = "";
+  appendSpacerRow(start * PREVIEW_ROW_HEIGHT);
+  for (let rowIndex = start; rowIndex < end; rowIndex += 1) {
     const tr = document.createElement("tr");
-    for (let col = 0; col < maxColumns; col += 1) {
+    tr.className = "preview-data-row";
+    for (let column = 0; column < state.previewColumnCount; column += 1) {
       const td = document.createElement("td");
-      td.textContent = row[col] ?? "";
+      td.textContent = state.previewRows[rowIndex][column] ?? "";
       tr.append(td);
     }
     refs.previewBody.append(tr);
-  });
+  }
+  appendSpacerRow((state.previewRows.length - end) * PREVIEW_ROW_HEIGHT);
 }
 
-function updateModeVisibility() {
-  const profile = refs.profile.value;
-  refs.genericOptions.classList.toggle("hidden", profile !== "generic");
-  refs.rawOptions.classList.toggle("hidden", profile !== "raw");
-  refs.chiOptions.classList.toggle("hidden", profile !== "chi");
+function renderPreview(datasets, options, mode = state.previewMode) {
+  state.previewMode = mode;
+  state.previewRows = mode === "statistics"
+    ? buildStatisticsRows(datasets, options.statisticsDuration)
+    : buildDataRows(datasets, options);
+  state.previewColumnCount = state.previewRows.reduce((max, row) => Math.max(max, row.length), 0);
+  state.previewRange = { start: -1, end: -1 };
+  refs.previewHead.innerHTML = "";
+  refs.previewBody.innerHTML = "";
+  const head = document.createElement("tr");
+  for (let column = 0; column < state.previewColumnCount; column += 1) {
+    const th = document.createElement("th");
+    th.textContent = `列 ${column + 1}`;
+    head.append(th);
+  }
+  refs.previewHead.append(head);
+  refs.previewWrap.scrollTop = 0;
+  refs.previewDataTab.classList.toggle("active", mode === "data");
+  refs.previewStatisticsTab.classList.toggle("active", mode === "statistics");
+  renderVirtualPreview(true);
+}
 
-  const chiMode = refs.chiExtractMode.value;
-  refs.chiLastPointsField.classList.toggle("hidden", chiMode !== "last_points");
-  refs.chiLastSecondsField.classList.toggle("hidden", chiMode !== "last_seconds");
-  refs.chiTimeMinField.classList.toggle("hidden", chiMode !== "time_range");
-  refs.chiTimeMaxField.classList.toggle("hidden", chiMode !== "time_range");
+async function handlePreview() {
+  try {
+    const datasets = await buildDatasets();
+    renderPreview(datasets, collectOptions());
+    refs.previewDataTab.disabled = false;
+    refs.previewStatisticsTab.disabled = false;
+    const timedCount = datasets.filter(({ header }) => findTimeColumnIndex(header) >= 0).length;
+    setStatus(`已读取 ${datasets.length} 个文件。${timedCount ? `其中 ${timedCount} 个文件可按 Time 列统计。` : "这批文件没有 Time 列，已读取原始数据。"}`);
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
 
+async function handleExport() {
+  try {
+    const datasets = await buildDatasets();
+    exportXlsx(datasets, collectOptions());
+    setStatus(`转换完成：${collectOptions().outputName}.xlsx`);
+  } catch (error) {
+    setStatus(error.message, true);
+  }
 }
 
 function selectedIndex() {
@@ -645,79 +450,62 @@ function selectedIndex() {
 
 function moveSelected(offset) {
   const index = selectedIndex();
-  if (index < 0) {
-    return;
-  }
   const target = index + offset;
-  if (target < 0 || target >= state.files.length) {
-    return;
-  }
+  if (index < 0 || target < 0 || target >= state.files.length) return;
   [state.files[index], state.files[target]] = [state.files[target], state.files[index]];
   refreshFileList();
   refs.fileList.selectedIndex = target;
-}
-
-async function handlePreview() {
-  try {
-    const { datasets, options } = await buildDatasets();
-    renderPreview(datasets, options);
-    setStatus(`已载入 ${datasets.length} 个文件，预览显示前 12 行。`);
-  } catch (error) {
-    setStatus(error.message, true);
-  }
-}
-
-async function handleExport() {
-  try {
-    const { datasets, options } = await buildDatasets();
-    if (options.exportFormat === "csv") {
-      if (options.layout === "both") {
-        throw new Error("CSV 不支持同时导出两张表，请改成横向或纵向。");
-      }
-      exportCsv(datasets, options);
-    } else {
-      exportXlsx(datasets, options);
-    }
-    setStatus(`导出完成: ${options.outputName}.${options.exportFormat}`);
-  } catch (error) {
-    setStatus(error.message, true);
-  }
 }
 
 refs.fileInput.addEventListener("change", (event) => {
   const files = Array.from(event.target.files || []);
   state.files.push(...files);
   refreshFileList();
-  setStatus(`已添加 ${files.length} 个文件。`);
+  setStatus(`已添加 ${files.length} 个 TXT 文件。`);
   refs.fileInput.value = "";
 });
 
 refs.removeSelected.addEventListener("click", () => {
-  const selected = Array.from(refs.fileList.selectedOptions).map((option) => Number(option.value));
-  state.files = state.files.filter((_, index) => !selected.includes(index));
+  const selected = new Set(Array.from(refs.fileList.selectedOptions, (option) => Number(option.value)));
+  state.files = state.files.filter((_, index) => !selected.has(index));
   refreshFileList();
 });
-
 refs.moveUp.addEventListener("click", () => moveSelected(-1));
 refs.moveDown.addEventListener("click", () => moveSelected(1));
 refs.clearFiles.addEventListener("click", () => {
   state.files = [];
+  state.datasets = [];
+  state.previewRows = [];
+  state.previewColumnCount = 0;
+  state.previewRange = { start: -1, end: -1 };
+  state.previewMode = "data";
   refreshFileList();
   refs.previewHead.innerHTML = "";
   refs.previewBody.innerHTML = "";
+  refs.previewDataTab.disabled = true;
+  refs.previewStatisticsTab.disabled = true;
+  refs.previewDataTab.classList.add("active");
+  refs.previewStatisticsTab.classList.remove("active");
   setStatus("文件列表已清空。");
 });
-
-refs.profile.addEventListener("change", updateModeVisibility);
-refs.layout.addEventListener("change", updateModeVisibility);
-refs.chiExtractMode.addEventListener("change", updateModeVisibility);
-refs.exportFormat.addEventListener("change", () => {
-  if (refs.exportFormat.value === "csv" && refs.layout.value === "both") {
-    refs.layout.value = "horizontal";
-  }
-  updateModeVisibility();
+refs.previewWrap.addEventListener("scroll", () => {
+  if (state.previewFrame !== null) return;
+  state.previewFrame = requestAnimationFrame(() => {
+    state.previewFrame = null;
+    renderVirtualPreview();
+  });
 });
 refs.buildPreview.addEventListener("click", handlePreview);
 refs.exportButton.addEventListener("click", handleExport);
-
-updateModeVisibility();
+refs.previewDataTab.addEventListener("click", () => {
+  if (state.datasets.length) renderPreview(state.datasets, collectOptions(), "data");
+});
+refs.previewStatisticsTab.addEventListener("click", () => {
+  if (state.datasets.length) renderPreview(state.datasets, collectOptions(), "statistics");
+});
+refs.layoutInputs.forEach((input) => input.addEventListener("change", () => {
+  if (state.datasets.length) renderPreview(state.datasets, collectOptions());
+}));
+refs.statisticsDuration.addEventListener("change", () => {
+  if (state.datasets.length) renderPreview(state.datasets, collectOptions());
+});

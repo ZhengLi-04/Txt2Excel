@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Txt2Excel</title>
+    <title>CHI TXT 转 Excel</title>
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./styles.css" />
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
     <script src="./app.js" defer></script>
@@ -12,23 +13,17 @@
     <div class="page-shell">
       <header class="topbar panel">
         <div class="topbar-main">
-          <p class="eyebrow">TXT / CSV / XLSX</p>
-          <h1>Txt2Excel</h1>
-          <p class="hero-copy">本地选文件、本地解析、本地导出。桌面端一屏完成文件列表、参数配置和表格预览。</p>
+          <p class="eyebrow">CHI TXT → EXCEL</p>
+          <h1>CHI 电化学数据转换器</h1>
+          <p class="hero-copy">批量转换 CHI 导出的 TXT，保留原始列名和数值。支持 Time 数据和单通道、多通道 CV 数据。</p>
         </div>
       </header>
 
       <main class="workspace">
         <aside class="panel panel-files">
           <div class="panel-head">
-            <div>
-              <p class="panel-kicker">Files</p>
-              <h2>文件列表</h2>
-            </div>
-            <label class="button primary">
-              添加 TXT
-              <input id="file-input" type="file" accept=".txt,text/plain" multiple hidden />
-            </label>
+            <div><p class="panel-kicker">Files</p><h2>文件列表</h2></div>
+            <label class="button primary">添加 TXT<input id="file-input" type="file" accept=".txt,text/plain" multiple hidden /></label>
           </div>
           <div class="file-actions">
             <button id="remove-selected" class="button ghost" type="button">移除</button>
@@ -40,123 +35,63 @@
         </aside>
 
         <section class="panel panel-options">
-          <div class="panel-head">
-            <div>
-              <p class="panel-kicker">Config</p>
-              <h2>导出配置</h2>
-            </div>
-          </div>
+          <div class="panel-head"><div><p class="panel-kicker">Config</p><h2>导出配置</h2></div></div>
 
-          <div class="grid grid-main">
-            <label class="field">
-              <span>处理模式</span>
-              <select id="profile">
-                <option value="chi" selected>CHI 电化学数据</option>
-                <option value="generic">通用分列</option>
-                <option value="raw">原始文本/末尾行</option>
-              </select>
+          <section class="config-section config-section-accent">
+            <div class="section-heading">
+              <h3>Origin 数据表</h3>
+              <p>保留 CHI 数据表中的原始列名和数值，不进行统计或电化学计算。</p>
+            </div>
+            <div class="output-map" aria-label="Origin 数据表结构">
+              <div><span>第 1 行</span><strong>TXT 文件名</strong></div>
+              <div><span>第 2 行</span><strong>原始列名（如 Potential/V、i1/A）</strong></div>
+              <div><span>第 3 行起</span><strong>原始数值数据</strong></div>
+            </div>
+
+            <div class="section-heading config-gap"><h3>文件怎样排列</h3><p>横向并排便于比较多条曲线；纵向追加便于筛选和整理。</p></div>
+            <div class="choice-group choice-group-two" role="radiogroup" aria-label="拼接方式">
+              <label class="choice-card"><input type="radio" name="layout" value="horizontal" checked /><span><strong>横向并排（推荐）</strong><small>每个文件占一组列，直接复制到 Origin</small></span></label>
+              <label class="choice-card"><input type="radio" name="layout" value="vertical" /><span><strong>纵向追加</strong><small>增加“文件名”列后依次向下排列</small></span></label>
+            </div>
+          </section>
+
+          <section class="config-section">
+            <div class="section-heading">
+              <h3>末段自动统计</h3>
+              <p>含 Time 列的文件以各自的最后时间点为终点，向前取指定时长并计算各测量列的平均值。</p>
+            </div>
+            <label class="stat-window">
+              <span>计算最后</span>
+              <input id="statistics-duration" type="number" min="0.1" step="0.1" value="30" />
+              <span>秒的平均值</span>
             </label>
+            <p class="config-note">结果写入 Statistics 工作表；若文件总时长不足，则自动使用该文件的全部可用数据。</p>
+          </section>
 
-            <label class="field">
-              <span>拼接方式</span>
-              <select id="layout">
-                <option value="horizontal">横向拼接</option>
-                <option value="vertical">纵向合并</option>
-                <option value="both">两张表</option>
-              </select>
+          <section class="config-section">
+            <div class="section-heading"><h3>保存为 Excel</h3><p>导出原始数据、末段统计；可选附带 CHI 文件头参数。</p></div>
+            <label class="field"><span>文件名</span><input id="output-name" type="text" value="chi-converted-data" /></label>
+            <label class="check-row slim">
+              <input id="chi-include-metadata" type="checkbox" />
+              <span class="check-copy"><strong>另外生成 Header Info 工作表</strong><small>保留 CHI 日期、技术、仪器和实验参数</small></span>
             </label>
-
-            <label class="field">
-              <span>导出格式</span>
-              <select id="export-format">
-                <option value="xlsx">Excel (.xlsx)</option>
-                <option value="csv">CSV (.csv)</option>
-              </select>
-            </label>
-
-            <label class="field">
-              <span>文件名前缀</span>
-              <input id="output-name" type="text" value="txt-excel-export" />
-            </label>
-          </div>
-
-          <div id="generic-options" class="subpanel">
-            <h3>通用分列</h3>
-            <div class="grid grid-sub">
-              <label class="field">
-                <span>分隔符</span>
-                <input id="delimiter" type="text" value="," />
-              </label>
-              <label class="field">
-                <span>最后 N 行</span>
-                <input id="generic-last-lines" type="number" min="0" value="0" />
-              </label>
-            </div>
-          </div>
-
-          <div id="raw-options" class="subpanel hidden">
-            <h3>原始文本</h3>
-            <div class="grid grid-sub">
-              <label class="field">
-                <span>保留最后 N 行</span>
-                <input id="raw-last-lines" type="number" min="0" value="300" />
-              </label>
-            </div>
-          </div>
-
-          <div id="chi-options" class="subpanel hidden">
-            <h3>CHI 电化学数据</h3>
-            <div class="grid grid-sub">
-              <label class="field">
-                <span>提取方式</span>
-                <select id="chi-extract-mode">
-                  <option value="last_seconds">最后 N 秒</option>
-                  <option value="time_range">指定时间区间</option>
-                  <option value="last_points">最后 N 行</option>
-                  <option value="all">全部数据</option>
-                </select>
-              </label>
-            </div>
-
-            <div class="grid grid-sub">
-              <label id="chi-last-points-field" class="field">
-                <span>最后 N 行</span>
-                <input id="chi-last-points" type="number" min="0" value="300" />
-              </label>
-              <label id="chi-last-seconds-field" class="field hidden">
-                <span>最后 N 秒</span>
-                <input id="chi-last-seconds" type="number" min="0" step="0.1" value="30" />
-              </label>
-              <label id="chi-time-min-field" class="field hidden">
-                <span>起始时间</span>
-                <input id="time-min" type="number" step="any" />
-              </label>
-              <label id="chi-time-max-field" class="field hidden">
-                <span>结束时间</span>
-                <input id="time-max" type="number" step="any" />
-              </label>
-            </div>
-          </div>
+          </section>
         </section>
 
         <section class="panel panel-preview">
           <div class="panel-head">
-            <div>
-              <p class="panel-kicker">Preview</p>
-              <h2>导出预览</h2>
-            </div>
+            <div><p class="panel-kicker">Preview</p><h2>导出预览</h2></div>
             <div class="panel-head-actions">
+              <div class="preview-tabs" role="tablist" aria-label="预览内容">
+                <button id="preview-data-tab" class="preview-tab active" type="button" disabled>Origin Data</button>
+                <button id="preview-statistics-tab" class="preview-tab" type="button" disabled>Statistics</button>
+              </div>
               <button id="build-preview" class="button ghost" type="button">刷新预览</button>
               <button id="export-button" class="button primary" type="button">导出文件</button>
             </div>
           </div>
           <div id="status" class="status">等待选择文件。</div>
-          <div class="preview-wrap">
-            <table id="preview-table">
-              <thead></thead>
-              <tbody></tbody>
-            </table>
-          </div>
+          <div class="preview-wrap"><table id="preview-table"><thead></thead><tbody></tbody></table></div>
         </section>
       </main>
     </div>
